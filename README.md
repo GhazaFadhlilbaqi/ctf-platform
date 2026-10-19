@@ -197,9 +197,3 @@ scoreboard is derived data: it can be rebuilt from the `solves` table.
 - Pods `CreateContainerConfigError` → the `ctf-secrets` Secret is missing; run `./scripts/create-secrets.sh`.
 - `ImagePullBackOff` on GKE → check the project id in `k8s/overlays/gke/kustomization.yaml` and that the image was pushed.
 - Admin password changed in the Secret but login fails → the admin is only created on first boot; the old password still applies.
-
-## Use of generative AI
-
-This project was built with help from Claude (Anthropic), an AI assistant,
-used under the course's generative AI policy.
-

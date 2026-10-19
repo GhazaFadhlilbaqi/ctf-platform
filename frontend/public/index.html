@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CTF Platform</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="top">
+    <div class="wrap">
+      <a class="site" href="#/challenges">CTF Platform</a>
+      <span id="nav">
+        <a href="#/challenges" data-route="challenges">Challenges</a>
+        <a href="#/scoreboard" data-route="scoreboard">Scoreboard</a>
+        <a href="#/admin" data-route="admin" class="admin-only" hidden>Admin</a>
+      </span>
+      <span id="session"></span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <p id="msg" hidden></p>
+    <div id="view"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

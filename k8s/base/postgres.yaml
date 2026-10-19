@@ -1,0 +1,70 @@
+# Postgres runs as a StatefulSet: a stable pod name (postgres-0) and its own
+# PersistentVolume, so the data survives the pod being deleted or rescheduled.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  selector: { app: postgres }
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: ctf
+            - name: POSTGRES_DB
+              value: ctf
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ctf-secrets, key: POSTGRES_PASSWORD }
+          # Postgres 18 images store data under /var/lib/postgresql/18/...,
+          # so the volume is mounted one level up (not at .../data).
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ctf", "-d", "ctf"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ctf", "-d", "ctf"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+  # One PersistentVolumeClaim per replica, created automatically. Uses the
+  # cluster's default StorageClass (kind: local disk, GKE: a Persistent Disk).
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

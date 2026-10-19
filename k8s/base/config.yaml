@@ -1,0 +1,12 @@
+# Non-secret settings shared by the services. Secrets (JWT key, passwords)
+# live in the "ctf-secrets" Secret, created by scripts/create-secrets.sh.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ctf-config
+data:
+  ADMIN_USERNAME: admin
+  # Service names resolve through cluster DNS to a load-balanced ClusterIP.
+  CHALLENGES_URL: http://challenges:8080
+  SCOREBOARD_URL: http://scoreboard:8080
+  REDIS_ADDR: redis:6379

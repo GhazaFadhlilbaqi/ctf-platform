@@ -1,0 +1,6 @@
+# Everything for the platform lives in its own namespace, so one command
+# (kubectl delete namespace ctf) removes it all.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ctf

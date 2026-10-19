@@ -1,0 +1,25 @@
+# Google Kubernetes Engine. Images come from Artifact Registry.
+# scripts/gke-setup.sh replaces YOUR_PROJECT_ID below with your project ID.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: ctf/auth
+    newName: australia-southeast1-docker.pkg.dev/YOUR_PROJECT_ID/ctf/auth
+  - name: ctf/challenges
+    newName: australia-southeast1-docker.pkg.dev/YOUR_PROJECT_ID/ctf/challenges
+  - name: ctf/submissions
+    newName: australia-southeast1-docker.pkg.dev/YOUR_PROJECT_ID/ctf/submissions
+  - name: ctf/scoreboard
+    newName: australia-southeast1-docker.pkg.dev/YOUR_PROJECT_ID/ctf/scoreboard
+  - name: ctf/frontend
+    newName: australia-southeast1-docker.pkg.dev/YOUR_PROJECT_ID/ctf/frontend
+patches:
+  # A LoadBalancer Service makes GKE provision a Google Cloud network load
+  # balancer with a public IP in front of the frontend pods.
+  - target: { kind: Service, name: frontend }
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: LoadBalancer

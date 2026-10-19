@@ -1,0 +1,2 @@
+User-agent: *
+Disallow: /n0t-a-s3cr3t.txt

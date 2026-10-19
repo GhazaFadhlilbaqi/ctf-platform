@@ -1,0 +1,17 @@
+# Local cluster (kind). Images are loaded straight into the nodes with
+# `kind load docker-image`, so the base names (ctf/<service>:v1) are used as-is.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  # Expose the frontend on node port 30080; kind-config.yaml maps that to
+  # http://localhost:8081 on your machine.
+  - target: { kind: Service, name: frontend }
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080

@@ -1,0 +1,14 @@
+# Local 3-node cluster: 1 control plane + 2 workers, so you can rehearse
+# "drain a node and the app keeps working" before doing it on GKE.
+#   kind create cluster --config k8s/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ctf
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080   # the frontend NodePort (see overlays/kind)
+        hostPort: 8081         # -> http://localhost:8081
+        listenAddress: "127.0.0.1"   # only reachable from this laptop, not the local network
+  - role: worker
+  - role: worker

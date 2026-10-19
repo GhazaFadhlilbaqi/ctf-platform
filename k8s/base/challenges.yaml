@@ -1,0 +1,131 @@
+# challenges: Challenge catalogue; owns the challenges table and the flag hashes.
+#
+# Four objects per microservice:
+#   Deployment               runs the pods and performs rolling updates
+#   Service                  one stable DNS name + load balancing across the pods
+#   HorizontalPodAutoscaler  adds/removes pods based on CPU usage
+#   PodDisruptionBudget      keeps at least one pod up while a node is drained
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: challenges
+  labels: { app: challenges }
+  annotations:
+    kubernetes.io/change-cause: "v1: initial release"
+spec:
+  # No "replicas" here on purpose: the HPA below owns the replica count.
+  revisionHistoryLimit: 5        # old ReplicaSets kept for `kubectl rollout undo`
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                # start one new pod at a time...
+      maxUnavailable: 0          # ...and never drop below the current capacity
+  selector:
+    matchLabels: { app: challenges }
+  template:
+    metadata:
+      labels: { app: challenges }
+    spec:
+      terminationGracePeriodSeconds: 30
+      # Spread replicas over different nodes, so losing a node never takes
+      # out every copy of the service.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: challenges }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532    # distroless "nonroot" user; must be numeric so k8s can verify non-root
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: challenges
+          image: ctf/challenges:v1     # rewritten per environment by the kustomize overlays
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # $(POSTGRES_PASSWORD) is expanded by Kubernetes from the variable above.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ctf-secrets, key: POSTGRES_PASSWORD }
+            - name: DATABASE_URL
+              value: postgres://ctf:$(POSTGRES_PASSWORD)@postgres:5432/ctf?sslmode=disable
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ctf-secrets, key: JWT_SECRET }
+          # startupProbe: give the app up to 90s to boot (it waits for the DB).
+          # Liveness/readiness only start once this has passed.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 3
+            failureThreshold: 30
+          # readiness: is the DB/Redis reachable? If not, stop sending traffic here.
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          # liveness: is the process stuck? If so, restart the container.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          # On shutdown wait 5s before SIGTERM, so the Service stops routing
+          # here first and no request hits a closing pod.
+          lifecycle:
+            preStop:
+              sleep: { seconds: 5 }
+          # requests = what the scheduler reserves (and what HPA % is measured against)
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { cpu: 500m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: challenges
+  labels: { app: challenges }
+spec:
+  type: ClusterIP              # internal only; the frontend gateway is the way in
+  selector: { app: challenges }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: challenges
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: challenges
+  minReplicas: 2               # 2 minimum = still up if one pod dies
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60   # scale out when pods average >60% of requested CPU
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60   # default is 5 min; shorter so the demo scales back in quickly
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: challenges
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: challenges }

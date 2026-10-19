@@ -1,0 +1,99 @@
+# Local development stack. Run:   docker compose up --build
+# then open http://localhost:8080   (admin login: admin / adminpass123)
+#
+# Rebuild just one service after editing it:
+#   docker compose up --build -d challenges
+#
+# These secrets are for local dev only; Kubernetes gets real ones from a Secret.
+
+name: ctf
+
+x-go-service: &go-service
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+x-env: &common-env
+  JWT_SECRET: local-dev-only-jwt-secret-0123456789abcdef
+  DATABASE_URL: postgres://ctf:ctfpass@postgres:5432/ctf?sslmode=disable
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ctf
+      POSTGRES_PASSWORD: ctfpass
+      POSTGRES_DB: ctf
+    # Postgres 18 images keep data under /var/lib/postgresql (not .../data).
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctf -d ctf"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    # appendonly = write every change to disk so scores survive a restart
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  auth:
+    <<: *go-service
+    build: ./services/auth
+    image: ctf/auth:v1
+    environment:
+      <<: *common-env
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: adminpass123
+
+  challenges:
+    <<: *go-service
+    build: ./services/challenges
+    image: ctf/challenges:v1
+    environment:
+      <<: *common-env
+
+  submissions:
+    <<: *go-service
+    build: ./services/submissions
+    image: ctf/submissions:v1
+    environment:
+      <<: *common-env
+      CHALLENGES_URL: http://challenges:8080
+      SCOREBOARD_URL: http://scoreboard:8080
+
+  scoreboard:
+    build: ./services/scoreboard
+    image: ctf/scoreboard:v1
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: local-dev-only-jwt-secret-0123456789abcdef
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    image: ctf/frontend:v1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"   # only reachable from this laptop, not the local network
+    depends_on:
+      - auth
+      - challenges
+      - submissions
+      - scoreboard
+
+volumes:
+  pgdata:
+  redisdata:

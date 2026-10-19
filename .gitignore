@@ -1,0 +1,5 @@
+# Go build output
+/services/*/service
+/services/*/*.exe
+# local env files
+.env

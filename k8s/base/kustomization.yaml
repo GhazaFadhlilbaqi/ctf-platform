@@ -1,0 +1,18 @@
+# Kustomize "base": the manifests shared by every environment.
+# Deploy through an overlay instead:  kubectl apply -k k8s/overlays/kind  (or gke)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ctf
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: ctf-platform
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - redis.yaml
+  - auth.yaml
+  - challenges.yaml
+  - submissions.yaml
+  - scoreboard.yaml
+  - frontend.yaml

@@ -4,26 +4,7 @@ A small Capture-the-Flag platform built as Go microservices and deployed on
 Kubernetes (GKE). Players register, browse challenges, submit flags and
 climb a live scoreboard; admins manage challenges.
 
-```
-                  Internet
-                      │
-        ┌─────────────▼──────────────┐
-        │ Google Cloud Load Balancer │   (Service type LoadBalancer)
-        └─────────────┬──────────────┘
-                      │
-        ┌─────────────▼──────────────┐
-        │ frontend  (nginx, 2-4 pods)│   static UI + API gateway
-        └──┬─────────┬─────────┬─────┴───────────┐
-   /api/auth  /api/challenges  /api/submissions  /api/scoreboard
-           │         │         │                 │
-     ┌─────▼──┐ ┌────▼──────┐ ┌▼───────────┐ ┌───▼────────┐
-     │  auth  │ │challenges │◄┤submissions ├►│ scoreboard │   Go + Gin, 2-6 pods each (HPA)
-     └───┬────┘ └────┬──────┘ └─────┬──────┘ └───┬────────┘
-         │  users    │ challenges   │ solves     │ sorted set
-     ┌───▼───────────▼──────────────▼───┐   ┌────▼─────┐
-     │ PostgreSQL 18 (StatefulSet + PV) │   │ Redis 8  │ (StatefulSet + PV)
-     └──────────────────────────────────┘   └──────────┘
-```
+![Architecture of the CTF platform on GKE](docs/ctf-architecture.png)
 
 Each service owns its own table, verifies the same JWT locally, and only talks
 to other services over the cluster network. `/internal/...` routes are never
@@ -55,7 +36,12 @@ Each service has the same shape, so reading one makes the others easy:
 `services/auth/handlers.go`, then `services/submissions/handlers.go`, which
 shows service-to-service calls and what happens when one of them fails.
 
-## 0. One-time setup (CachyOS)
+## 0. One-time setup
+
+Needs Go 1.27+, Docker (with compose and buildx), kubectl, kind, oha and the
+Google Cloud CLI with the GKE auth plugin. The commands below are for Arch-based
+Linux (CachyOS); on other systems install the same tools with your package
+manager. `bash scripts/check-setup.sh` checks for all of them.
 
 ```bash
 # Go toolchain, Docker, Kubernetes tools, and a load generator for the HPA demo
@@ -89,7 +75,13 @@ kind delete cluster --name ctf       # tear down
 ```
 
 Load the 8 starter challenges (a fresh cluster has an empty database):
-`./scripts/seed-challenges.sh http://localhost:8081 <admin-password>`.
+
+```bash
+# print the admin password stored in the cluster's Secret
+kubectl -n ctf get secret ctf-secrets -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d
+# log in as admin and create the challenges through the API
+./scripts/seed-challenges.sh http://localhost:8081 <admin-password>
+```
 
 After changing code: `./scripts/build-images.sh v1`, `kind load docker-image ctf/<svc>:v1 --name ctf`,
 then `kubectl -n ctf rollout restart deployment/<svc>`.
@@ -97,12 +89,22 @@ then `kubectl -n ctf rollout restart deployment/<svc>`.
 ## 3. Deploy to GKE
 
 ```bash
-gcloud auth login
+gcloud auth login                                   # log in to Google Cloud (opens a browser)
 PROJECT_ID=<your-project> ./scripts/gke-setup.sh    # once: APIs, registry, 3-node cluster
 PROJECT_ID=<your-project> ./scripts/gke-deploy.sh   # build, push, deploy, print public IP
+./scripts/seed-challenges.sh http://<public-ip> <admin-password>   # load the starter challenges
+
+# push the v2 frontend (mustard accent) used by the rolling-update demo
+ACCENT='#e0a83b' ./scripts/build-images.sh v2
+docker tag ctf/frontend:v2 australia-southeast1-docker.pkg.dev/<your-project>/ctf/frontend:v2
+docker push australia-southeast1-docker.pkg.dev/<your-project>/ctf/frontend:v2
+
 ./scripts/gke-pause.sh               # between sessions: 0 nodes, saves credits
 ./scripts/gke-pause.sh resume        # back to 3 nodes (do this well before marking)
 ```
+
+On GKE, `demo.sh` must use the Artifact Registry images, so set this first:
+`export REGISTRY=australia-southeast1-docker.pkg.dev/<your-project>/ctf`
 
 To tear everything down after marking:
 `gcloud container clusters delete ctf-cluster --zone australia-southeast1-a` and
@@ -159,9 +161,11 @@ Each microservice owns its own data; no service reads another service's tables.
 | PostgreSQL `solves` | submissions | `id` PK, `user_id`, `username`, `challenge_id`, `points`, `solved_at`, UNIQUE(`user_id`, `challenge_id`) | The UNIQUE constraint makes double-solving impossible |
 | Redis sorted set `scoreboard` | scoreboard | member = username, score = total points | `ZINCRBY` to award, `ZREVRANGE` for the top N |
 
-There are no foreign keys between tables, because each table belongs to a different
-service (database-per-service pattern). The scoreboard is derived data: it can be
-rebuilt from the `solves` table.
+All three tables live in one PostgreSQL instance, but each table belongs to one
+service and no service reads another's table (services ask each other over HTTP
+instead). That is why there are no foreign keys between them, and it means the
+tables could later be moved into separate databases without code changes. The
+scoreboard is derived data: it can be rebuilt from the `solves` table.
 
 ## Design notes (useful for the proposal and Q&A)
 
@@ -193,4 +197,9 @@ rebuilt from the `solves` table.
 - Pods `CreateContainerConfigError` → the `ctf-secrets` Secret is missing; run `./scripts/create-secrets.sh`.
 - `ImagePullBackOff` on GKE → check the project id in `k8s/overlays/gke/kustomization.yaml` and that the image was pushed.
 - Admin password changed in the Secret but login fails → the admin is only created on first boot; the old password still applies.
+
+## Use of generative AI
+
+This project was built with help from Claude (Anthropic), an AI assistant,
+used under the course's generative AI policy.
 
